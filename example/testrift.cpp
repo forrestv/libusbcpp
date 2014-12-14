@@ -109,7 +109,7 @@ public:
     
     void run() {
         libusbcpp::Context ctx;
-        std::unique_ptr<libusbcpp::Device> devp = ctx.open_device_with_vid_pid(0x2833, 0x0021);
+        std::unique_ptr<libusbcpp::DeviceHandle> devp = ctx.open_device_with_vid_pid(0x2833, 0x0021);
         
         if(devp->kernel_driver_active(0)) {
             devp->detach_kernel_driver(0);
@@ -124,8 +124,12 @@ public:
         libusbcpp::Transfer transfers[TRANSFERS];
         uint8_t bufs[TRANSFERS][64];
         for(size_t i = 0; i < TRANSFERS; i++) {
-            transfers[i].fill_interrupt(*devp, 0x81, bufs[i], 64, [this, i, &transfers, &bufs]() {
-                handle_report(bufs[i]);
+            transfers[i].fill_interrupt(*devp, 0x81, bufs[i], 64, [this, i, &transfers, &bufs](libusb_transfer_status status, int actual_length) {
+                if(status != LIBUSB_TRANSFER_COMPLETED) {
+                    std::cout << "libusb transfer error " << status << std::endl;
+                } else {
+                    handle_report(bufs[i]);
+                }
                 transfers[i].submit();
             });
             transfers[i].submit();

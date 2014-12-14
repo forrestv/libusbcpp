@@ -1,7 +1,9 @@
 #include <cstdlib>
 #include <stdexcept>
 #include <sstream>
+#include <unordered_map>
 
+#include <boost/foreach.hpp>
 #include <boost/function.hpp>
 #include <boost/utility.hpp>
 
@@ -10,27 +12,51 @@
 namespace libusbcpp {
 
 
-class Error : public std::runtime_error {
-public:
-    explicit Error(std::string const & what_arg) :
-        std::runtime_error(what_arg) {
+class Error : public std::exception { virtual char const * what() = 0; };
+std::unordered_map<int, std::function<void(void)> > errors;
+template<typename ErrorType>
+struct ErrorInserter {
+    ErrorInserter(int error_code) {
+        errors.insert(std::make_pair(error_code, []() {
+            throw ErrorType();
+        }));
     }
 };
+#define MAKE_EXC(NAME, CODE) \
+    class NAME##Error : public Error { \
+        char const * what() { \
+            return libusb_strerror(LIBUSB_ERROR_##CODE); \
+        } \
+    }; \
+    ErrorInserter<NAME##Error> _##NAME##Error_inserter(LIBUSB_ERROR_##CODE);
+MAKE_EXC(IO, IO)
+MAKE_EXC(InvalidParam, INVALID_PARAM)
+MAKE_EXC(Access, ACCESS)
+MAKE_EXC(NoDevice, NO_DEVICE)
+MAKE_EXC(NotFound, NOT_FOUND)
+MAKE_EXC(Busy, BUSY)
+MAKE_EXC(Timeout, TIMEOUT)
+MAKE_EXC(Overflow, OVERFLOW)
+MAKE_EXC(Pipe, PIPE)
+MAKE_EXC(Interrupted, INTERRUPTED)
+MAKE_EXC(NoMem, NO_MEM)
+MAKE_EXC(NotSupported, NOT_SUPPORTED)
+MAKE_EXC(Other, OTHER)
 
-int check_error(int res) {
+template<typename T>
+T check_error(T res) {
     if(res >= 0) return res;
-    throw Error(
-        std::string(libusb_error_name(static_cast<libusb_error>(res))) + " " +
-        std::string(libusb_strerror  (static_cast<libusb_error>(res))));
+    errors[res](); // will always throw
+    assert(false);
 }
 
-class Device : boost::noncopyable {
+class DeviceHandle : boost::noncopyable {
 public:
-    libusb_device_handle * const handle_;
-    Device(libusb_device_handle * handle) :
-        handle_(handle) {
+    libusb_device_handle * handle_; // XXX shouldn't be public, but Transfer needs it
+    DeviceHandle(libusb_device * dev) {
+        check_error(libusb_open(dev, &handle_));
     }
-    ~Device() {
+    ~DeviceHandle() {
         libusb_close(handle_);
     }
     
@@ -78,12 +104,7 @@ class Transfer : boost::noncopyable {
     static void cb(libusb_transfer *transfer) {
         try {
             Transfer & t = *reinterpret_cast<Transfer *>(transfer->user_data);
-            if(t.transfer_->status != LIBUSB_TRANSFER_COMPLETED) {
-                std::ostringstream msg;
-                msg << "libusb transfer error " << t.transfer_->status << std::endl;
-                throw Error(msg.str());
-            }
-            t.callback_();
+            t.callback_(t.transfer_->status, t.transfer_->actual_length);
         } catch(std::exception const & exc) {
             std::cout << "caught in callback: " << exc.what() << std::endl;
         } catch(...) {
@@ -92,12 +113,12 @@ class Transfer : boost::noncopyable {
     }
     
     libusb_transfer * transfer_;
-    boost::function<void()> callback_;
+    boost::function<void(libusb_transfer_status, int)> callback_;
 public:
     Transfer(int iso_packets=0) {
         transfer_ = libusb_alloc_transfer(iso_packets);
         if(!transfer_) {
-            throw Error("libusb_alloc_transfer returned NULL");
+            throw std::bad_alloc();
         }
     }
     ~Transfer() {
@@ -111,13 +132,40 @@ public:
         check_error(libusb_cancel_transfer(transfer_));
     }
     
-    void fill_bulk(Device & dev_handle, unsigned char endpoint, unsigned char * buffer, int length, boost::function<void()> callback, unsigned int timeout=0) {
+    void fill_bulk(DeviceHandle & dev_handle, unsigned char endpoint, unsigned char * buffer, int length, boost::function<void(libusb_transfer_status, int)> callback, unsigned int timeout=0) {
         callback_ = callback;
         libusb_fill_bulk_transfer(transfer_, dev_handle.handle_, endpoint, buffer, length, cb, reinterpret_cast<void *>(this), timeout);
     }
-    void fill_interrupt(Device & dev_handle, unsigned char endpoint, unsigned char * buffer, int length, boost::function<void()> callback, unsigned int timeout=0) {
+    void fill_interrupt(DeviceHandle & dev_handle, unsigned char endpoint, unsigned char * buffer, int length, boost::function<void(libusb_transfer_status, int)> callback, unsigned int timeout=0) {
         callback_ = callback;
         libusb_fill_interrupt_transfer(transfer_, dev_handle.handle_, endpoint, buffer, length, cb, reinterpret_cast<void *>(this), timeout);
+    }
+};
+
+class Device {
+    libusb_device * device_;
+public:
+    Device(libusb_device * device) : device_(device) {
+        libusb_ref_device(device_);
+    }
+    Device(Device const & device) : device_(device.device_) {
+        libusb_ref_device(device_);
+    }
+    Device(Device && device) = delete;
+    ~Device() {
+        libusb_unref_device(device_);
+    }
+    Device & operator=(Device const & other) = delete;
+    Device & operator=(Device && other) = delete;
+    
+    libusb_device_descriptor get_device_descriptor() const {
+        libusb_device_descriptor res;
+        check_error(libusb_get_device_descriptor(device_, &res));
+        return res;
+    }
+    
+    std::unique_ptr<DeviceHandle> open() const {
+        return std::unique_ptr<DeviceHandle>(new DeviceHandle(device_));
     }
 };
 
@@ -135,13 +183,25 @@ public:
         libusb_set_debug(context_, level);
     }
     
-    std::unique_ptr<Device> open_device_with_vid_pid(uint16_t vendor_id, uint16_t product_id) {
-        libusb_device_handle * h = libusb_open_device_with_vid_pid(context_,
-            vendor_id, product_id);
-        if(!h) {
-            throw Error("open device failed");
+    std::vector<Device> get_device_list() {
+        libusb_device **list;
+        ssize_t count = check_error(libusb_get_device_list(context_, &list));
+        std::vector<Device> result;
+        for(ssize_t i = 0; i < count; i++) {
+            result.emplace_back(list[i]);
         }
-        return std::unique_ptr<Device>(new Device(h));
+        libusb_free_device_list(list, true);
+        return result;
+    }
+    
+    std::unique_ptr<DeviceHandle> open_device_with_vid_pid(uint16_t vendor_id, uint16_t product_id) {
+        BOOST_FOREACH(Device const & d, get_device_list()) {
+            libusb_device_descriptor desc = d.get_device_descriptor();
+            if(desc.idVendor == vendor_id && desc.idProduct == product_id) {
+                return d.open();
+            }
+        }
+        throw std::runtime_error("device not found");
     }
     
     void handle_events_timeout_completed(timeval & tv, int * completed=nullptr) {
