@@ -12,7 +12,10 @@
 namespace libusbcpp {
 
 
-class Error : public std::exception { virtual char const * what() = 0; };
+class Error : public std::exception {
+public:
+    virtual char const * what() const throw () override = 0;
+};
 std::unordered_map<int, std::function<void(void)> > errors;
 template<typename ErrorType>
 struct ErrorInserter {
@@ -24,8 +27,13 @@ struct ErrorInserter {
 };
 #define MAKE_EXC(NAME, CODE) \
     class NAME##Error : public Error { \
-        char const * what() { \
-            return libusb_strerror(LIBUSB_ERROR_##CODE); \
+        std::string message_; \
+    public: \
+        NAME##Error() { \
+            message_ = std::string("libusb error: ") + libusb_strerror(LIBUSB_ERROR_##CODE); \
+        } \
+        char const * what() const throw () override { \
+            return message_.c_str(); \
         } \
     }; \
     ErrorInserter<NAME##Error> _##NAME##Error_inserter(LIBUSB_ERROR_##CODE);
@@ -104,6 +112,7 @@ class Transfer : boost::noncopyable {
     static void cb(libusb_transfer *transfer) {
         try {
             Transfer & t = *reinterpret_cast<Transfer *>(transfer->user_data);
+            t.active_ = false;
             t.callback_(t.transfer_->status, t.transfer_->actual_length);
         } catch(std::exception const & exc) {
             std::cout << "caught in callback: " << exc.what() << std::endl;
@@ -114,19 +123,27 @@ class Transfer : boost::noncopyable {
     
     libusb_transfer * transfer_;
     boost::function<void(libusb_transfer_status, int)> callback_;
+    bool active_;
 public:
     Transfer(int iso_packets=0) {
         transfer_ = libusb_alloc_transfer(iso_packets);
         if(!transfer_) {
             throw std::bad_alloc();
         }
+        active_ = false;
     }
     ~Transfer() {
-        libusb_free_transfer(transfer_);
+        if(!active_) {
+            // leak the transfer if we can't free it. ):
+            // alternative solution would be to cancel and then somehow wait
+            // for callback to confirm cancel
+            libusb_free_transfer(transfer_);
+        }
     }
     
     void submit() {
         check_error(libusb_submit_transfer(transfer_));
+        active_ = true;
     }
     void cancel() {
         check_error(libusb_cancel_transfer(transfer_));
