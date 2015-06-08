@@ -136,12 +136,8 @@ public:
         active_ = false;
     }
     ~Transfer() {
-        if(!active_) {
-            // leak the transfer if we can't free it. ):
-            // alternative solution would be to cancel and then somehow wait
-            // for callback to confirm cancel
-            libusb_free_transfer(transfer_);
-        }
+        assert(!active_);
+        libusb_free_transfer(transfer_);
     }
     
     void submit() {
