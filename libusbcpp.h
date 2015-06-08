@@ -1,3 +1,6 @@
+#ifndef GUARD_XNYTIPRASSUKKTNM
+#define GUARD_XNYTIPRASSUKKTNM
+
 #include <cstdlib>
 #include <stdexcept>
 #include <sstream>
@@ -13,7 +16,7 @@ namespace libusbcpp {
 
 
 class Error : public std::exception { virtual char const * what() = 0; };
-std::unordered_map<int, std::function<void(void)> > errors;
+static std::unordered_map<int, std::function<void(void)> > errors;
 template<typename ErrorType>
 struct ErrorInserter {
     ErrorInserter(int error_code) {
@@ -28,7 +31,7 @@ struct ErrorInserter {
             return libusb_strerror(LIBUSB_ERROR_##CODE); \
         } \
     }; \
-    ErrorInserter<NAME##Error> _##NAME##Error_inserter(LIBUSB_ERROR_##CODE);
+    static ErrorInserter<NAME##Error> _##NAME##Error_inserter(LIBUSB_ERROR_##CODE);
 MAKE_EXC(IO, IO)
 MAKE_EXC(InvalidParam, INVALID_PARAM)
 MAKE_EXC(Access, ACCESS)
@@ -132,6 +135,10 @@ public:
         check_error(libusb_cancel_transfer(transfer_));
     }
     
+    void fill_control(DeviceHandle & dev_handle,  unsigned char * buffer, boost::function<void(libusb_transfer_status, int)> callback, unsigned int timeout=0) {
+        callback_ = callback;
+        libusb_fill_control_transfer(transfer_, dev_handle.handle_, buffer, cb, reinterpret_cast<void *>(this), timeout);
+    }
     void fill_bulk(DeviceHandle & dev_handle, unsigned char endpoint, unsigned char * buffer, int length, boost::function<void(libusb_transfer_status, int)> callback, unsigned int timeout=0) {
         callback_ = callback;
         libusb_fill_bulk_transfer(transfer_, dev_handle.handle_, endpoint, buffer, length, cb, reinterpret_cast<void *>(this), timeout);
@@ -211,3 +218,5 @@ public:
 
 
 }
+
+#endif
