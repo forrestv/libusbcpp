@@ -116,23 +116,29 @@ public:
         }
         
         for(size_t i = 0; i < 3; i++) {
-            devp->control_transfer(0x21, 9, 0x0302, 0, (unsigned char *)"\x02\x00\x00\x00\x00\x00\x00", 7);
+            libusbcpp::Transfer t; t.fill_control(0x21, 9, 0x0302, 0, (unsigned char *)"\x02\x00\x00\x00\x00\x00\x00", 7);
+            devp->submit_sync(t);
         }
-        devp->control_transfer(0x21, 9, 0x0311, 0, (unsigned char *)"\x11\x00\x00\x0b\x10\x27", 6);
+        {
+            libusbcpp::Transfer t; t.fill_control(0x21, 9, 0x0311, 0, (unsigned char *)"\x11\x00\x00\x0b\x10\x27", 6);
+            devp->submit_sync(t);
+        }
         
         static size_t const TRANSFERS = 64;
         libusbcpp::Transfer transfers[TRANSFERS];
         uint8_t bufs[TRANSFERS][64];
+        boost::function<void()> callbacks[TRANSFERS];
         for(size_t i = 0; i < TRANSFERS; i++) {
-            transfers[i].fill_interrupt(*devp, 0x81, bufs[i], 64, [this, i, &transfers, &bufs](libusb_transfer_status status, int actual_length) {
-                if(status != LIBUSB_TRANSFER_COMPLETED) {
-                    std::cout << "libusb transfer error " << status << std::endl;
+            transfers[i].fill_interrupt(0x81, bufs[i], 64);
+            callbacks[i] = [this, i, &transfers, &bufs, &devp, &callbacks]() {
+                if(transfers[i].get_transfer().status != LIBUSB_TRANSFER_COMPLETED) {
+                    std::cout << "libusb transfer error " << transfers[i].get_transfer().status << std::endl;
                 } else {
                     handle_report(bufs[i]);
                 }
-                transfers[i].submit();
-            });
-            transfers[i].submit();
+                devp->submit_async(transfers[i], callbacks[i]);
+            };
+            devp->submit_async(transfers[i], callbacks[i]);
         }
         
         while(true) {

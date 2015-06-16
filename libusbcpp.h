@@ -61,114 +61,148 @@ T check_error(T res) {
     assert(false);
 }
 
-class DeviceHandle : boost::noncopyable {
-public:
-    libusb_device_handle * handle_; // XXX shouldn't be public, but Transfer needs it
-    DeviceHandle(libusb_device * dev) {
-        check_error(libusb_open(dev, &handle_));
-    }
-    ~DeviceHandle() {
-        libusb_close(handle_);
-    }
-    
-    bool kernel_driver_active(int interface_number) {
-        return check_error(libusb_kernel_driver_active(handle_, interface_number)) == 1;
-    }
-    void detach_kernel_driver(int interface_number) {
-        check_error(libusb_detach_kernel_driver(handle_, interface_number));
-    }
-    
-    int get_configuration() {
-        int res;
-        check_error(libusb_get_configuration(handle_, &res));
-        return res;
-    }
-    void set_configuration(int configuration) {
-        check_error(libusb_set_configuration(handle_, configuration));
-    }
-    
-    void claim_interface(int interface_number) {
-        check_error(libusb_claim_interface(handle_, interface_number));
-    }
-    void release_interface(int interface_number) {
-        check_error(libusb_release_interface(handle_, interface_number));
-    }
-    void set_interface_alt_setting(int interface_number, int alternate_setting) {
-        check_error(libusb_set_interface_alt_setting(handle_, interface_number, alternate_setting));
-    }
-    
-    size_t control_transfer(uint8_t bmRequestType, uint8_t bRequest,
-    uint16_t wValue, uint16_t wIndex, unsigned char * data, uint16_t wLength,
-    unsigned int timeout=0) {
-        return check_error(libusb_control_transfer(handle_, bmRequestType,
-            bRequest, wValue, wIndex, data, wLength, timeout));
-    }
-    
-    void interrupt_transfer(unsigned char endpoint, unsigned char * data,
-    int length, int & transferred, unsigned int timeout=0) {
-        check_error(libusb_interrupt_transfer(handle_, endpoint, data,
-            length, &transferred, timeout));
-    }
-};
-
 class Transfer : boost::noncopyable {
-    static void cb(libusb_transfer *transfer) {
-        try {
-            Transfer & t = *reinterpret_cast<Transfer *>(transfer->user_data);
-            t.active_ = false;
-            t.callback_(t.transfer_->status, t.transfer_->actual_length);
-        } catch(std::exception const & exc) {
-            std::cout << "caught in callback: " << exc.what() << std::endl;
-        } catch(...) {
-            std::cout << "caught in callback: ???" << std::endl;
-        }
-    }
-    
     libusb_transfer * transfer_;
-    boost::function<void(libusb_transfer_status, int)> callback_;
-    bool active_;
+    bool own_buffer_;
 public:
     Transfer(int iso_packets=0) {
         transfer_ = libusb_alloc_transfer(iso_packets);
         if(!transfer_) {
             throw std::bad_alloc();
         }
-        active_ = false;
+        own_buffer_ = false;
     }
     ~Transfer() {
-        assert(!active_);
+        if(own_buffer_) {
+            delete[] transfer_->buffer;
+        }
         libusb_free_transfer(transfer_);
     }
     
-    void submit() {
-        check_error(libusb_submit_transfer(transfer_));
-        active_ = true;
-    }
-    void cancel() {
-        check_error(libusb_cancel_transfer(transfer_));
+    libusb_transfer & get_transfer() {
+        return *transfer_;
     }
     
-    void fill_control(DeviceHandle & dev_handle,  unsigned char * buffer, boost::function<void(libusb_transfer_status, int)> callback, unsigned int timeout=0) {
-        callback_ = callback;
-        libusb_fill_control_transfer(transfer_, dev_handle.handle_, buffer, cb, reinterpret_cast<void *>(this), timeout);
+    void fill_control(unsigned char * buffer, unsigned int timeout=0) {
+        libusb_fill_control_transfer(transfer_, NULL, buffer, NULL, NULL, timeout);
     }
-    void fill_bulk(DeviceHandle & dev_handle, unsigned char endpoint, unsigned char * buffer, int length, boost::function<void(libusb_transfer_status, int)> callback, unsigned int timeout=0) {
-        callback_ = callback;
-        libusb_fill_bulk_transfer(transfer_, dev_handle.handle_, endpoint, buffer, length, cb, reinterpret_cast<void *>(this), timeout);
+    void fill_control(uint8_t bmRequestType, uint8_t bRequest, uint16_t wValue, uint16_t wIndex, unsigned char *data_out, uint16_t wLength, unsigned int timeout=0) {
+        unsigned char * buffer = new unsigned char[LIBUSB_CONTROL_SETUP_SIZE + wLength];
+        assert(!own_buffer_);
+        own_buffer_ = true;
+        libusb_fill_control_setup(buffer, bmRequestType, bRequest, wValue, wIndex, wLength);
+        bool out = (bmRequestType & LIBUSB_ENDPOINT_DIR_MASK) == LIBUSB_ENDPOINT_OUT;
+        if(wLength) {
+            assert(out == (data_out != NULL));
+            if(out) {
+                memcpy(buffer + LIBUSB_CONTROL_SETUP_SIZE, data_out, wLength);
+            }
+        }
+        fill_control(buffer, timeout);
     }
-    void fill_interrupt(DeviceHandle & dev_handle, unsigned char endpoint, unsigned char * buffer, int length, boost::function<void(libusb_transfer_status, int)> callback, unsigned int timeout=0) {
-        callback_ = callback;
-        libusb_fill_interrupt_transfer(transfer_, dev_handle.handle_, endpoint, buffer, length, cb, reinterpret_cast<void *>(this), timeout);
+    void fill_bulk(unsigned char endpoint, unsigned char * buffer, int length, unsigned int timeout=0) {
+        libusb_fill_bulk_transfer(transfer_, NULL, endpoint, buffer, length, NULL, NULL, timeout);
+    }
+    void fill_interrupt(unsigned char endpoint, unsigned char * buffer, int length, unsigned int timeout=0) {
+        libusb_fill_interrupt_transfer(transfer_, NULL, endpoint, buffer, length, NULL, NULL, timeout);
+    }
+};
+
+class DeviceHandle : boost::noncopyable {
+public:
+    virtual ~DeviceHandle() { };
+    virtual bool kernel_driver_active(int interface_number) = 0;
+    virtual void detach_kernel_driver(int interface_number) = 0;
+    virtual int get_configuration() = 0;
+    virtual void set_configuration(int configuration) = 0;
+    virtual void claim_interface(int interface_number) = 0;
+    virtual void release_interface(int interface_number) = 0;
+    virtual void set_interface_alt_setting(int interface_number, int alternate_setting) = 0;
+    virtual void submit_sync(Transfer & transfer) = 0;
+    virtual void submit_async(Transfer & transfer, boost::function<void()> callback) = 0;
+};
+
+class LibUSBDeviceHandle : public DeviceHandle {
+    libusb_context * context_;
+    libusb_device_handle * handle_;
+public:
+    LibUSBDeviceHandle(libusb_context * context, libusb_device * dev) : context_(context) {
+        check_error(libusb_open(dev, &handle_));
+    }
+    ~LibUSBDeviceHandle() override {
+        libusb_close(handle_);
+    }
+    
+    bool kernel_driver_active(int interface_number) override {
+        return check_error(libusb_kernel_driver_active(handle_, interface_number)) == 1;
+    }
+    void detach_kernel_driver(int interface_number) override {
+        check_error(libusb_detach_kernel_driver(handle_, interface_number));
+    }
+    
+    int get_configuration() override {
+        int res;
+        check_error(libusb_get_configuration(handle_, &res));
+        return res;
+    }
+    void set_configuration(int configuration) override {
+        check_error(libusb_set_configuration(handle_, configuration));
+    }
+    
+    void claim_interface(int interface_number) override {
+        check_error(libusb_claim_interface(handle_, interface_number));
+    }
+    void release_interface(int interface_number) override {
+        check_error(libusb_release_interface(handle_, interface_number));
+    }
+    void set_interface_alt_setting(int interface_number, int alternate_setting) override {
+        check_error(libusb_set_interface_alt_setting(handle_, interface_number, alternate_setting));
+    }
+    
+    void submit_sync(Transfer & transfer) {
+        int completed = 0;
+        submit_async(transfer, [&completed]() {
+            completed = 1;
+        });
+        while(!completed) {
+            check_error(libusb_handle_events_completed(context_, &completed));
+        }
+    }
+    
+private:
+    class CallbackHelper {
+    public:
+        CallbackHelper(boost::function<void()> callback) : callback_(callback) { };
+        boost::function<void()> callback_;
+    };
+    static void cb(libusb_transfer *transfer) {
+        try {
+            CallbackHelper *tp = reinterpret_cast<CallbackHelper *>(transfer->user_data);
+            tp->callback_();
+            delete tp;
+        } catch(std::exception const & exc) {
+            std::cout << "caught in callback: " << exc.what() << std::endl;
+        } catch(...) {
+            std::cout << "caught in callback: ???" << std::endl;
+        }
+    }
+public:
+    void submit_async(Transfer & transfer, boost::function<void()> callback) {
+        transfer.get_transfer().dev_handle = handle_;
+        transfer.get_transfer().callback = cb;
+        transfer.get_transfer().user_data = new CallbackHelper(callback);
+        check_error(libusb_submit_transfer(&transfer.get_transfer()));
     }
 };
 
 class Device {
+    libusb_context * context_;
     libusb_device * device_;
 public:
-    Device(libusb_device * device) : device_(device) {
+    Device(libusb_context * context, libusb_device * device) : context_(context), device_(device) {
         libusb_ref_device(device_);
     }
-    Device(Device const & device) : device_(device.device_) {
+    Device(Device const & device) : context_(device.context_), device_(device.device_) {
         libusb_ref_device(device_);
     }
     Device(Device && device) = delete;
@@ -185,15 +219,16 @@ public:
     }
     
     std::unique_ptr<DeviceHandle> open() const {
-        return std::unique_ptr<DeviceHandle>(new DeviceHandle(device_));
+        return std::unique_ptr<DeviceHandle>(new LibUSBDeviceHandle(context_, device_));
     }
 };
 
 class Context : boost::noncopyable {
     libusb_context * context_;
 public:
-    Context() {
+    Context(int debug_level=LIBUSB_LOG_LEVEL_NONE) {
         check_error(libusb_init(&context_));
+        libusb_set_debug(context_, debug_level);
     }
     ~Context() {
         libusb_exit(context_);
@@ -208,7 +243,7 @@ public:
         ssize_t count = check_error(libusb_get_device_list(context_, &list));
         std::vector<Device> result;
         for(ssize_t i = 0; i < count; i++) {
-            result.emplace_back(list[i]);
+            result.emplace_back(context_, list[i]);
         }
         libusb_free_device_list(list, true);
         return result;
