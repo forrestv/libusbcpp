@@ -167,6 +167,7 @@ public:
         while(!completed) {
             check_error(libusb_handle_events_completed(context_, &completed));
         }
+        assert(transfer.get_transfer().status == LIBUSB_TRANSFER_COMPLETED);
     }
     
 private:
@@ -224,13 +225,30 @@ public:
 };
 
 class Context : boost::noncopyable {
+public:
+    virtual ~Context() { };
+    virtual std::vector<Device> get_device_list() = 0;
+    
+    std::unique_ptr<DeviceHandle> open_device_with_vid_pid(uint16_t vendor_id, uint16_t product_id) {
+        BOOST_FOREACH(Device const & d, get_device_list()) {
+            libusb_device_descriptor desc = d.get_device_descriptor();
+            if(desc.idVendor == vendor_id && desc.idProduct == product_id) {
+                return d.open();
+            }
+        }
+        throw std::runtime_error("device not found");
+    }
+    
+    virtual void handle_events_timeout_completed(timeval & tv, int * completed=nullptr) = 0;
+};
+
+class LibUSBContext : public Context {
     libusb_context * context_;
 public:
-    Context(int debug_level=LIBUSB_LOG_LEVEL_NONE) {
+    LibUSBContext() {
         check_error(libusb_init(&context_));
-        libusb_set_debug(context_, debug_level);
     }
-    ~Context() {
+    ~LibUSBContext() {
         libusb_exit(context_);
     }
     
@@ -247,16 +265,6 @@ public:
         }
         libusb_free_device_list(list, true);
         return result;
-    }
-    
-    std::unique_ptr<DeviceHandle> open_device_with_vid_pid(uint16_t vendor_id, uint16_t product_id) {
-        BOOST_FOREACH(Device const & d, get_device_list()) {
-            libusb_device_descriptor desc = d.get_device_descriptor();
-            if(desc.idVendor == vendor_id && desc.idProduct == product_id) {
-                return d.open();
-            }
-        }
-        throw std::runtime_error("device not found");
     }
     
     void handle_events_timeout_completed(timeval & tv, int * completed=nullptr) {
