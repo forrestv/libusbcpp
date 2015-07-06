@@ -19,15 +19,23 @@ class Error : public std::exception {
 public:
     virtual char const * what() const throw () override = 0;
 };
-static std::unordered_map<int, std::function<void(void)> > errors;
-template<typename ErrorType>
-struct ErrorInserter {
-    ErrorInserter(int error_code) {
-        errors.insert(std::make_pair(error_code, []() {
-            throw ErrorType();
-        }));
-    }
-};
+
+
+#define APPLY_EXCEPTIONS(F) \
+    F(IO, IO) \
+    F(InvalidParam, INVALID_PARAM) \
+    F(Access, ACCESS) \
+    F(NoDevice, NO_DEVICE) \
+    F(NotFound, NOT_FOUND) \
+    F(Busy, BUSY) \
+    F(Timeout, TIMEOUT) \
+    F(Overflow, OVERFLOW) \
+    F(Pipe, PIPE) \
+    F(Interrupted, INTERRUPTED) \
+    F(NoMem, NO_MEM) \
+    F(NotSupported, NOT_SUPPORTED) \
+    F(Other, OTHER)
+
 #define MAKE_EXC(NAME, CODE) \
     class NAME##Error : public Error { \
         std::string message_; \
@@ -38,26 +46,15 @@ struct ErrorInserter {
         char const * what() const throw () override { \
             return message_.c_str(); \
         } \
-    }; \
-    static ErrorInserter<NAME##Error> _##NAME##Error_inserter(LIBUSB_ERROR_##CODE);
-MAKE_EXC(IO, IO)
-MAKE_EXC(InvalidParam, INVALID_PARAM)
-MAKE_EXC(Access, ACCESS)
-MAKE_EXC(NoDevice, NO_DEVICE)
-MAKE_EXC(NotFound, NOT_FOUND)
-MAKE_EXC(Busy, BUSY)
-MAKE_EXC(Timeout, TIMEOUT)
-MAKE_EXC(Overflow, OVERFLOW)
-MAKE_EXC(Pipe, PIPE)
-MAKE_EXC(Interrupted, INTERRUPTED)
-MAKE_EXC(NoMem, NO_MEM)
-MAKE_EXC(NotSupported, NOT_SUPPORTED)
-MAKE_EXC(Other, OTHER)
+    };
+APPLY_EXCEPTIONS(MAKE_EXC)
+    
 
 template<typename T>
 T check_error(T res) {
     if(res >= 0) return res;
-    errors[res](); // will always throw
+    #define HANDLE(NAME, CODE) if(res == LIBUSB_ERROR_##CODE) throw NAME##Error();
+    APPLY_EXCEPTIONS(HANDLE)
     assert(false);
 }
 
