@@ -178,7 +178,9 @@ public:
         while(!completed) {
             check_error(libusb_handle_events_completed(context_, &completed));
         }
-        assert(transfer.get_transfer().status == LIBUSB_TRANSFER_COMPLETED);
+        if(transfer.get_transfer().status != LIBUSB_TRANSFER_COMPLETED) {
+            throw std::runtime_error("transfer failed");
+        }
     }
     
 private:
