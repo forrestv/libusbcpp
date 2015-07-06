@@ -81,11 +81,17 @@ public:
     }
     
     void fill_control(unsigned char * buffer, unsigned int timeout=0) {
+        if(own_buffer_) {
+            delete[] transfer_->buffer;
+        }
+        own_buffer_ = false;
         libusb_fill_control_transfer(transfer_, NULL, buffer, NULL, NULL, timeout);
     }
     void fill_control(uint8_t bmRequestType, uint8_t bRequest, uint16_t wValue, uint16_t wIndex, unsigned char *data_out, uint16_t wLength, unsigned int timeout=0) {
         unsigned char * buffer = new unsigned char[LIBUSB_CONTROL_SETUP_SIZE + wLength];
-        assert(!own_buffer_);
+        if(own_buffer_) {
+            delete[] transfer_->buffer;
+        }
         own_buffer_ = true;
         libusb_fill_control_setup(buffer, bmRequestType, bRequest, wValue, wIndex, wLength);
         bool out = (bmRequestType & LIBUSB_ENDPOINT_DIR_MASK) == LIBUSB_ENDPOINT_OUT;
@@ -95,12 +101,20 @@ public:
                 memcpy(buffer + LIBUSB_CONTROL_SETUP_SIZE, data_out, wLength);
             }
         }
-        fill_control(buffer, timeout);
+        libusb_fill_control_transfer(transfer_, NULL, buffer, NULL, NULL, timeout);
     }
     void fill_bulk(unsigned char endpoint, unsigned char * buffer, int length, unsigned int timeout=0) {
+        if(own_buffer_) {
+            delete[] transfer_->buffer;
+        }
+        own_buffer_ = false;
         libusb_fill_bulk_transfer(transfer_, NULL, endpoint, buffer, length, NULL, NULL, timeout);
     }
     void fill_interrupt(unsigned char endpoint, unsigned char * buffer, int length, unsigned int timeout=0) {
+        if(own_buffer_) {
+            delete[] transfer_->buffer;
+        }
+        own_buffer_ = false;
         libusb_fill_interrupt_transfer(transfer_, NULL, endpoint, buffer, length, NULL, NULL, timeout);
     }
 };
