@@ -87,7 +87,7 @@ public:
         own_buffer_ = false;
         libusb_fill_control_transfer(transfer_, NULL, buffer, NULL, NULL, timeout);
     }
-    void fill_control(uint8_t bmRequestType, uint8_t bRequest, uint16_t wValue, uint16_t wIndex, unsigned char *data_out, uint16_t wLength, unsigned int timeout=0) {
+    void fill_control(uint8_t bmRequestType, uint8_t bRequest, uint16_t wValue, uint16_t wIndex, unsigned char const *data_out, uint16_t wLength, unsigned int timeout=0) {
         unsigned char * buffer = new unsigned char[LIBUSB_CONTROL_SETUP_SIZE + wLength];
         if(own_buffer_) {
             delete[] transfer_->buffer;
