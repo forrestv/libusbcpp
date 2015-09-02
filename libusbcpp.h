@@ -196,8 +196,10 @@ private:
             delete tp;
         } catch(std::exception const & exc) {
             std::cout << "caught in callback: " << exc.what() << std::endl;
+            abort();
         } catch(...) {
             std::cout << "caught in callback: ???" << std::endl;
+            abort();
         }
     }
 public:
