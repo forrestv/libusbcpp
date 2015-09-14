@@ -130,7 +130,7 @@ public:
     virtual void release_interface(int interface_number) = 0;
     virtual void set_interface_alt_setting(int interface_number, int alternate_setting) = 0;
     virtual void submit_sync(Transfer & transfer) = 0;
-    virtual void submit_async(Transfer & transfer, boost::function<void()> callback) = 0;
+    virtual boost::function<void()> submit_async(Transfer & transfer, boost::function<void()> callback) = 0; // returns cancellation function
 };
 
 class LibUSBDeviceHandle : public DeviceHandle {
@@ -203,11 +203,14 @@ private:
         }
     }
 public:
-    void submit_async(Transfer & transfer, boost::function<void()> callback) {
+    boost::function<void()> submit_async(Transfer & transfer, boost::function<void()> callback) {
         transfer.get_transfer().dev_handle = handle_;
         transfer.get_transfer().callback = cb;
         transfer.get_transfer().user_data = new CallbackHelper(callback);
         check_error(libusb_submit_transfer(&transfer.get_transfer()));
+        return [&transfer]() {
+            check_error(libusb_cancel_transfer(&transfer.get_transfer()));
+        };
     }
 };
 
