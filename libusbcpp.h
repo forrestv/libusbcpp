@@ -62,6 +62,7 @@ class Transfer : boost::noncopyable {
     libusb_transfer * transfer_;
     bool own_buffer_;
 public:
+    boost::function<void()> callback_;
     Transfer(int iso_packets=0) {
         transfer_ = libusb_alloc_transfer(iso_packets);
         if(!transfer_) {
@@ -184,29 +185,24 @@ public:
     }
     
 private:
-    class CallbackHelper {
-    public:
-        CallbackHelper(boost::function<void()> callback) : callback_(callback) { };
-        boost::function<void()> callback_;
-    };
     static void cb(libusb_transfer *transfer) {
+        Transfer & t = *reinterpret_cast<Transfer *>(transfer->user_data);
         try {
-            CallbackHelper *tp = reinterpret_cast<CallbackHelper *>(transfer->user_data);
-            tp->callback_();
-            delete tp;
+            t.callback_();
         } catch(std::exception const & exc) {
             std::cout << "caught in callback: " << exc.what() << std::endl;
-            abort();
+            std::terminate();
         } catch(...) {
             std::cout << "caught in callback: ???" << std::endl;
-            abort();
+            std::terminate();
         }
     }
 public:
     boost::function<void()> submit_async(Transfer & transfer, boost::function<void()> callback) {
         transfer.get_transfer().dev_handle = handle_;
         transfer.get_transfer().callback = cb;
-        transfer.get_transfer().user_data = new CallbackHelper(callback);
+        transfer.get_transfer().user_data = &transfer;
+        transfer.callback_ = callback;
         check_error(libusb_submit_transfer(&transfer.get_transfer()));
         return [&transfer]() {
             check_error(libusb_cancel_transfer(&transfer.get_transfer()));
