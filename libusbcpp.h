@@ -2,6 +2,7 @@
 #define GUARD_XNYTIPRASSUKKTNM
 
 #include <cstdlib>
+#include <iostream>
 #include <stdexcept>
 #include <sstream>
 #include <unordered_map>
