@@ -121,9 +121,12 @@ public:
     }
 };
 
+class Device;
+
 class DeviceHandle : boost::noncopyable {
 public:
     virtual ~DeviceHandle() { };
+    virtual Device get_device() = 0;
     virtual bool kernel_driver_active(int interface_number) = 0;
     virtual void detach_kernel_driver(int interface_number) = 0;
     virtual int get_configuration() = 0;
@@ -145,6 +148,8 @@ public:
     ~LibUSBDeviceHandle() override {
         libusb_close(handle_);
     }
+    
+    Device get_device() override;
     
     bool kernel_driver_active(int interface_number) override {
         return check_error(libusb_kernel_driver_active(handle_, interface_number)) == 1;
@@ -221,7 +226,9 @@ public:
     Device(Device const & device) : context_(device.context_), device_(device.device_) {
         libusb_ref_device(device_);
     }
-    Device(Device && device) = delete;
+    Device(Device && device) : context_(device.context_), device_(device.device_) {
+        libusb_ref_device(device_);
+    }
     ~Device() {
         libusb_unref_device(device_);
     }
@@ -238,6 +245,10 @@ public:
         return std::unique_ptr<DeviceHandle>(new LibUSBDeviceHandle(context_, device_));
     }
 };
+
+inline Device LibUSBDeviceHandle::get_device() {
+    return Device(context_, libusb_get_device(handle_));
+}
 
 class Context : boost::noncopyable {
 public:
