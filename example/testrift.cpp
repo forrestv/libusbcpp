@@ -108,7 +108,7 @@ public:
     }
     
     void run() {
-        libusbcpp::Context ctx;
+        libusbcpp::LibUSBContext ctx;
         std::unique_ptr<libusbcpp::DeviceHandle> devp = ctx.open_device_with_vid_pid(0x2833, 0x0021);
         
         if(devp->kernel_driver_active(0)) {
