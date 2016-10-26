@@ -9,7 +9,6 @@
 #include <vector>
 
 #include <boost/function.hpp>
-#include <boost/utility.hpp>
 
 #include "libusb.h"
 
@@ -59,7 +58,9 @@ T check_error(T res) {
     assert(false);
 }
 
-class Transfer : boost::noncopyable {
+class Transfer {
+    Transfer(const Transfer&) = delete;
+    Transfer& operator=(const Transfer&) = delete;
     libusb_transfer * transfer_;
     bool own_buffer_;
 public:
@@ -123,7 +124,11 @@ public:
 
 class Device;
 
-class DeviceHandle : boost::noncopyable {
+class DeviceHandle {
+protected:
+    DeviceHandle() = default;
+    DeviceHandle(const DeviceHandle&) = delete;
+    DeviceHandle& operator=(const DeviceHandle&) = delete;
 public:
     virtual ~DeviceHandle() { };
     virtual Device get_device() = 0;
@@ -250,7 +255,11 @@ inline Device LibUSBDeviceHandle::get_device() {
     return Device(context_, libusb_get_device(handle_));
 }
 
-class Context : boost::noncopyable {
+class Context {
+protected:
+    Context() = default;
+    Context(const Context&) = delete;
+    Context& operator=(const Context&) = delete;
 public:
     virtual ~Context() { };
     virtual std::vector<Device> get_device_list() = 0;
