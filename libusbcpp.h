@@ -8,7 +8,6 @@
 #include <unordered_map>
 #include <vector>
 
-#include <boost/foreach.hpp>
 #include <boost/function.hpp>
 #include <boost/utility.hpp>
 
@@ -255,9 +254,9 @@ class Context : boost::noncopyable {
 public:
     virtual ~Context() { };
     virtual std::vector<Device> get_device_list() = 0;
-    
+
     std::unique_ptr<DeviceHandle> open_device_with_vid_pid(uint16_t vendor_id, uint16_t product_id) {
-        BOOST_FOREACH(Device const & d, get_device_list()) {
+        for(auto const & d: get_device_list()) {
             libusb_device_descriptor desc = d.get_device_descriptor();
             if(desc.idVendor == vendor_id && desc.idProduct == product_id) {
                 return d.open();
