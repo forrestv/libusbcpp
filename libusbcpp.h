@@ -7,8 +7,9 @@
 #include <sstream>
 #include <unordered_map>
 #include <vector>
-
-#include <boost/function.hpp>
+#include <functional>
+#include <memory>
+#include <cstring>
 
 #include "libusb.h"
 
@@ -64,7 +65,7 @@ class Transfer {
     libusb_transfer * transfer_;
     bool own_buffer_;
 public:
-    boost::function<void()> callback_;
+    std::function<void()> callback_;
     Transfer(int iso_packets=0) {
         transfer_ = libusb_alloc_transfer(iso_packets);
         if(!transfer_) {
@@ -140,7 +141,7 @@ public:
     virtual void release_interface(int interface_number) = 0;
     virtual void set_interface_alt_setting(int interface_number, int alternate_setting) = 0;
     virtual void submit_sync(Transfer & transfer) = 0;
-    virtual boost::function<void()> submit_async(Transfer & transfer, boost::function<void()> callback) = 0; // returns cancellation function
+    virtual std::function<void()> submit_async(Transfer & transfer, std::function<void()> callback) = 0; // returns cancellation function
 };
 
 class LibUSBDeviceHandle : public DeviceHandle {
@@ -209,7 +210,7 @@ private:
         }
     }
 public:
-    boost::function<void()> submit_async(Transfer & transfer, boost::function<void()> callback) {
+    std::function<void()> submit_async(Transfer & transfer, std::function<void()> callback) {
         transfer.get_transfer().dev_handle = handle_;
         transfer.get_transfer().callback = cb;
         transfer.get_transfer().user_data = &transfer;

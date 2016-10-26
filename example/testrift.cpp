@@ -127,7 +127,7 @@ public:
         static size_t const TRANSFERS = 64;
         libusbcpp::Transfer transfers[TRANSFERS];
         uint8_t bufs[TRANSFERS][64];
-        boost::function<void()> callbacks[TRANSFERS];
+        std::function<void()> callbacks[TRANSFERS];
         for(size_t i = 0; i < TRANSFERS; i++) {
             transfers[i].fill_interrupt(0x81, bufs[i], 64);
             callbacks[i] = [this, i, &transfers, &bufs, &devp, &callbacks]() {
