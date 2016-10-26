@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include <sstream>
 #include <unordered_map>
+#include <vector>
 
 #include <boost/foreach.hpp>
 #include <boost/function.hpp>
