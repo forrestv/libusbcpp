@@ -108,7 +108,7 @@ public:
     }
     
     void run() {
-        libusbcpp::Context ctx;
+        libusbcpp::LibUSBContext ctx;
         std::unique_ptr<libusbcpp::DeviceHandle> devp = ctx.open_device_with_vid_pid(0x2833, 0x0021);
         
         if(devp->kernel_driver_active(0)) {
@@ -127,7 +127,7 @@ public:
         static size_t const TRANSFERS = 64;
         libusbcpp::Transfer transfers[TRANSFERS];
         uint8_t bufs[TRANSFERS][64];
-        boost::function<void()> callbacks[TRANSFERS];
+        std::function<void()> callbacks[TRANSFERS];
         for(size_t i = 0; i < TRANSFERS; i++) {
             transfers[i].fill_interrupt(0x81, bufs[i], 64);
             callbacks[i] = [this, i, &transfers, &bufs, &devp, &callbacks]() {
