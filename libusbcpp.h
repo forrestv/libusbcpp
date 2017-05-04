@@ -244,6 +244,9 @@ public:
     std::unique_ptr<DeviceHandle> open() const {
         return std::unique_ptr<DeviceHandle>(new LibUSBDeviceHandle(context_, device_));
     }
+    
+    uint8_t get_bus_number() const { return libusb_get_bus_number(device_); }
+    uint8_t get_device_address() const { return libusb_get_device_address(device_); }
 };
 
 inline Device LibUSBDeviceHandle::get_device() {
