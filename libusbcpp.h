@@ -219,9 +219,15 @@ public:
 class Device {
     libusb_context * context_;
     libusb_device * device_;
+    std::vector<std::unique_ptr<libusb_config_descriptor, decltype(&libusb_free_config_descriptor)>> config_descriptors_;
 public:
     Device(libusb_context * context, libusb_device * device) : context_(context), device_(device) {
         libusb_ref_device(device_);
+        for(int i = 0; i < get_device_descriptor().bNumConfigurations; i++) {
+            libusb_config_descriptor * p;
+            check_error(libusb_get_config_descriptor(device_, i, &p));
+            config_descriptors_.emplace_back(p, libusb_free_config_descriptor);
+        }
     }
     Device(Device const & device) : context_(device.context_), device_(device.device_) {
         libusb_ref_device(device_);
@@ -246,7 +252,13 @@ public:
     }
     
     uint8_t get_bus_number() const { return libusb_get_bus_number(device_); }
+    uint8_t get_port_number() const { return libusb_get_port_number(device_); }
+    int get_port_numbers(uint8_t * port_numbers, int port_numbers_len) const { return check_error(libusb_get_port_numbers(device_, port_numbers, port_numbers_len)); }
+    // get_parent
     uint8_t get_device_address() const { return libusb_get_device_address(device_); }
+    libusb_speed get_device_speed() const { return libusb_speed(libusb_get_device_speed(device_)); }
+    uint16_t get_max_packet_size(unsigned char endpoint) const { return check_error(libusb_get_max_packet_size(device_, endpoint)); }
+    int get_max_iso_packet_size(unsigned char endpoint) const { return check_error(libusb_get_max_iso_packet_size(device_, endpoint)); }
 };
 
 inline Device LibUSBDeviceHandle::get_device() {
