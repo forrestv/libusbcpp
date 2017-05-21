@@ -177,7 +177,7 @@ public:
         check_error(libusb_set_interface_alt_setting(handle_, interface_number, alternate_setting));
     }
     
-    void submit_sync(Transfer & transfer) {
+    void submit_sync(Transfer & transfer) override {
         int completed = 0;
         submit_async(transfer, [&completed]() {
             completed = 1;
@@ -204,7 +204,7 @@ private:
         }
     }
 public:
-    boost::function<void()> submit_async(Transfer & transfer, boost::function<void()> callback) {
+    boost::function<void()> submit_async(Transfer & transfer, boost::function<void()> callback) override {
         transfer.get_transfer().dev_handle = handle_;
         transfer.get_transfer().callback = cb;
         transfer.get_transfer().user_data = &transfer;
@@ -285,7 +285,7 @@ public:
         libusb_set_debug(context_, level);
     }
     
-    std::vector<Device> get_device_list() {
+    std::vector<Device> get_device_list() override {
         libusb_device **list;
         ssize_t count = check_error(libusb_get_device_list(context_, &list));
         std::vector<Device> result;
@@ -296,7 +296,7 @@ public:
         return result;
     }
     
-    void handle_events_timeout_completed(timeval & tv, int * completed=nullptr) {
+    void handle_events_timeout_completed(timeval & tv, int * completed=nullptr) override {
         check_error(libusb_handle_events_timeout_completed(context_, &tv, completed));
     }
 };
