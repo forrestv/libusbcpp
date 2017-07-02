@@ -6,10 +6,10 @@
 #include <stdexcept>
 #include <sstream>
 #include <unordered_map>
-
-#include <boost/foreach.hpp>
-#include <boost/function.hpp>
-#include <boost/utility.hpp>
+#include <vector>
+#include <functional>
+#include <memory>
+#include <cstring>
 
 #include "libusb.h"
 
@@ -59,11 +59,13 @@ T check_error(T res) {
     assert(false);
 }
 
-class Transfer : boost::noncopyable {
+class Transfer {
+    Transfer(const Transfer&) = delete;
+    Transfer& operator=(const Transfer&) = delete;
     libusb_transfer * transfer_;
     bool own_buffer_;
 public:
-    boost::function<void()> callback_;
+    std::function<void()> callback_;
     Transfer(int iso_packets=0) {
         transfer_ = libusb_alloc_transfer(iso_packets);
         if(!transfer_) {
@@ -123,7 +125,11 @@ public:
 
 class Device;
 
-class DeviceHandle : boost::noncopyable {
+class DeviceHandle {
+protected:
+    DeviceHandle() = default;
+    DeviceHandle(const DeviceHandle&) = delete;
+    DeviceHandle& operator=(const DeviceHandle&) = delete;
 public:
     virtual ~DeviceHandle() { };
     virtual Device get_device() = 0;
@@ -135,7 +141,7 @@ public:
     virtual void release_interface(int interface_number) = 0;
     virtual void set_interface_alt_setting(int interface_number, int alternate_setting) = 0;
     virtual void submit_sync(Transfer & transfer) = 0;
-    virtual boost::function<void()> submit_async(Transfer & transfer, boost::function<void()> callback) = 0; // returns cancellation function
+    virtual std::function<void()> submit_async(Transfer & transfer, std::function<void()> callback) = 0; // returns cancellation function
 };
 
 class LibUSBDeviceHandle : public DeviceHandle {
@@ -194,8 +200,8 @@ private:
     static void cb(libusb_transfer *transfer) {
         Transfer & t = *reinterpret_cast<Transfer *>(transfer->user_data);
         try {
-            boost::function<void()> f = std::move(t.callback_);
-            t.callback_.clear();
+            std::function<void()> f = std::move(t.callback_);
+            t.callback_ = nullptr;
             f();
         } catch(std::exception const & exc) {
             std::cout << "caught in callback: " << exc.what() << std::endl;
@@ -206,7 +212,7 @@ private:
         }
     }
 public:
-    boost::function<void()> submit_async(Transfer & transfer, boost::function<void()> callback) override {
+    std::function<void()> submit_async(Transfer & transfer, std::function<void()> callback) override {
         transfer.get_transfer().dev_handle = handle_;
         transfer.get_transfer().callback = cb;
         transfer.get_transfer().user_data = &transfer;
@@ -267,13 +273,17 @@ inline Device LibUSBDeviceHandle::get_device() {
     return Device(context_, libusb_get_device(handle_));
 }
 
-class Context : boost::noncopyable {
+class Context {
+protected:
+    Context() = default;
+    Context(const Context&) = delete;
+    Context& operator=(const Context&) = delete;
 public:
     virtual ~Context() { };
     virtual std::vector<Device> get_device_list() = 0;
-    
+
     std::unique_ptr<DeviceHandle> open_device_with_vid_pid(uint16_t vendor_id, uint16_t product_id) {
-        BOOST_FOREACH(Device const & d, get_device_list()) {
+        for(auto const & d: get_device_list()) {
             libusb_device_descriptor desc = d.get_device_descriptor();
             if(desc.idVendor == vendor_id && desc.idProduct == product_id) {
                 return d.open();
