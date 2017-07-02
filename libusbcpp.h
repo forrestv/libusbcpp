@@ -1,6 +1,7 @@
 #ifndef GUARD_XNYTIPRASSUKKTNM
 #define GUARD_XNYTIPRASSUKKTNM
 
+#include <cassert>
 #include <cstdlib>
 #include <iostream>
 #include <stdexcept>
