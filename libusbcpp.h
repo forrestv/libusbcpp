@@ -194,7 +194,9 @@ private:
     static void cb(libusb_transfer *transfer) {
         Transfer & t = *reinterpret_cast<Transfer *>(transfer->user_data);
         try {
-            t.callback_();
+            boost::function<void()> f = std::move(t.callback_);
+            t.callback_.clear();
+            f();
         } catch(std::exception const & exc) {
             std::cout << "caught in callback: " << exc.what() << std::endl;
             std::terminate();
